@@ -13,7 +13,7 @@ services:
 
   # ── LiveKit Server (WebRTC SFU) ─────────────────────────────────────────────
   livekit-server:
-    image: livekit/livekit-server:v1.8
+    image: livekit/livekit-server:latest
     command: --config /etc/livekit.yaml
     ports:
       - "7880:7880"      # HTTP/WebSocket

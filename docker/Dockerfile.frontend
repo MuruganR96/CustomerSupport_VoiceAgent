@@ -3,6 +3,12 @@ FROM node:20-alpine AS builder
 
 WORKDIR /app
 
+# Accept Vite env vars as build args
+ARG VITE_BACKEND_URL=http://localhost:8000
+ARG VITE_LIVEKIT_URL=ws://localhost:7880
+ENV VITE_BACKEND_URL=$VITE_BACKEND_URL
+ENV VITE_LIVEKIT_URL=$VITE_LIVEKIT_URL
+
 COPY frontend/package.json frontend/package-lock.json* ./
 RUN npm install
 

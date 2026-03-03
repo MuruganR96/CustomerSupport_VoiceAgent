@@ -110,7 +110,10 @@ class _KokoroChunkedStream(tts.ChunkedStream):
 
             for graphemes, phonemes, audio_chunk in generator:
                 if audio_chunk is not None and len(audio_chunk) > 0:
-                    # audio_chunk is float32 [-1, 1], convert to int16 PCM
+                    # audio_chunk may be a PyTorch tensor or numpy array
+                    if hasattr(audio_chunk, 'numpy'):
+                        audio_chunk = audio_chunk.cpu().numpy()
+                    # Convert float32 [-1, 1] to int16 PCM
                     audio_int16 = (audio_chunk * 32767).astype(np.int16)
                     chunks.append(audio_int16.tobytes())
 

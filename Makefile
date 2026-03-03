@@ -44,7 +44,7 @@ dev-frontend: ## Run frontend dev server locally
 	cd frontend && npm install && npm run dev
 
 dev-agent: ## Run agent worker locally
-	cd agent_worker && python -m livekit.agents.cli dev --agent main
+	python -m agent_worker.main dev
 
 # ── Setup ─────────────────────────────────────────────────────────────────────
 

@@ -2,6 +2,7 @@
 
 import json
 import logging
+from datetime import timedelta
 from livekit.api import LiveKitAPI, AccessToken, VideoGrants
 
 from ..core.config import get_settings
@@ -23,23 +24,24 @@ class LiveKitService:
 
     def create_user_token(self, room_name: str, identity: str) -> str:
         """Generate a LiveKit access token for a user (customer)."""
-        token = AccessToken(
-            api_key=self.settings.livekit_api_key,
-            api_secret=self.settings.livekit_api_secret,
-        )
-        token.identity = identity
-        token.name = identity
-        token.add_grant(
-            VideoGrants(
-                room_join=True,
-                room=room_name,
-                can_publish=True,
-                can_subscribe=True,
-                can_publish_data=True,
+        token = (
+            AccessToken(
+                api_key=self.settings.livekit_api_key,
+                api_secret=self.settings.livekit_api_secret,
             )
+            .with_identity(identity)
+            .with_name(identity)
+            .with_grants(
+                VideoGrants(
+                    room_join=True,
+                    room=room_name,
+                    can_publish=True,
+                    can_subscribe=True,
+                    can_publish_data=True,
+                )
+            )
+            .with_ttl(timedelta(hours=6))
         )
-        # Token valid for 6 hours
-        token.ttl = 6 * 3600
         return token.to_jwt()
 
     async def create_room(self, room_name: str) -> dict:

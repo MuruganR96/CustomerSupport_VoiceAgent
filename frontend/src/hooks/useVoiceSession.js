@@ -7,6 +7,7 @@ import { useState, useRef, useCallback, useEffect } from 'react';
 import { Room, RoomEvent, ConnectionState, Track } from 'livekit-client';
 
 const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:8000';
+const LIVEKIT_URL = import.meta.env.VITE_LIVEKIT_URL || 'ws://localhost:7880';
 
 export function useVoiceSession() {
   // State
@@ -133,9 +134,8 @@ export function useVoiceSession() {
         }
       });
 
-      // 4. Connect to LiveKit
-      const livekitUrl = data.livekit_url.replace('ws://', 'ws://').replace('wss://', 'wss://');
-      await room.connect(livekitUrl, data.livekit_token);
+      // 4. Connect to LiveKit (use frontend env var, not backend's internal Docker URL)
+      await room.connect(LIVEKIT_URL, data.livekit_token);
 
       // 5. Enable microphone
       await room.localParticipant.setMicrophoneEnabled(true);

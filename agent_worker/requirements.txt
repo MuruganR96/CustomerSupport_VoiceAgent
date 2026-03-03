@@ -15,10 +15,10 @@ torch>=2.0.0
 numpy<2.0
 
 # LangGraph Agent
-langgraph==0.2.0
-langchain==0.3.0
-langchain-core==0.3.0
-langchain-openai==0.2.0
+langgraph>=0.2,<1.0
+langchain>=0.3,<1.0
+langchain-core>=0.3,<1.0
+langchain-openai>=0.2,<1.0
 
 # Config
 PyYAML==6.0.2
