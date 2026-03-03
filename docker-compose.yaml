@@ -1,0 +1,165 @@
+# =============================================================================
+# Customer Support Voice Agent — Docker Compose
+# =============================================================================
+# Architecture:
+#   Frontend (React) → Backend (FastAPI + LangGraph) → LiveKit Server
+#                                  ↕                       ↕
+#                          STT (Whisper)             TTS (Kokoro)
+# =============================================================================
+
+version: "3.9"
+
+services:
+
+  # ── LiveKit Server (WebRTC SFU) ─────────────────────────────────────────────
+  livekit-server:
+    image: livekit/livekit-server:v1.8
+    command: --config /etc/livekit.yaml
+    ports:
+      - "7880:7880"      # HTTP/WebSocket
+      - "7881:7881"      # TCP relay
+      - "50000-50100:50000-50100/udp"  # WebRTC UDP
+    volumes:
+      - ./livekit/livekit.yaml:/etc/livekit.yaml:ro
+    networks:
+      - voice-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:7880"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  # ── Redis (Session State) ───────────────────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - voice-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  # ── STT Service (Whisper) ───────────────────────────────────────────────────
+  stt-service:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.stt
+      args:
+        WHISPER_MODEL: base
+    ports:
+      - "8001:8001"
+    environment:
+      - WHISPER_MODEL=base
+      - WHISPER_DEVICE=cpu
+    networks:
+      - voice-network
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 4G
+        reservations:
+          memory: 2G
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8001/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+  # ── TTS Service (Kokoro) ────────────────────────────────────────────────────
+  tts-service:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.tts
+    ports:
+      - "8002:8002"
+    environment:
+      - KOKORO_VOICE=af_heart
+      - KOKORO_SAMPLE_RATE=24000
+      - KOKORO_DEVICE=cpu
+      - KOKORO_LANG_CODE=a
+    networks:
+      - voice-network
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 4G
+        reservations:
+          memory: 2G
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8002/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+  # ── Backend (FastAPI + LangGraph Agent) ─────────────────────────────────────
+  backend:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.backend
+    ports:
+      - "8000:8000"
+    environment:
+      - LIVEKIT_URL=ws://livekit-server:7880
+      - LIVEKIT_API_KEY=devkey
+      - LIVEKIT_API_SECRET=secret
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - REDIS_URL=redis://redis:6379/0
+      - STT_SERVICE_URL=http://stt-service:8001
+      - TTS_SERVICE_URL=http://tts-service:8002
+      - CORS_ORIGINS=http://localhost:3000,http://localhost:80
+      - LOG_LEVEL=INFO
+    depends_on:
+      livekit-server:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      stt-service:
+        condition: service_healthy
+      tts-service:
+        condition: service_healthy
+    networks:
+      - voice-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
+  # ── Frontend (React + Nginx) ────────────────────────────────────────────────
+  frontend:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.frontend
+      args:
+        VITE_BACKEND_URL: http://localhost:8000
+        VITE_LIVEKIT_URL: ws://localhost:7880
+    ports:
+      - "3000:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+    networks:
+      - voice-network
+    restart: unless-stopped
+
+# ── Volumes ───────────────────────────────────────────────────────────────────
+volumes:
+  redis_data:
+
+# ── Networks ──────────────────────────────────────────────────────────────────
+networks:
+  voice-network:
+    driver: bridge

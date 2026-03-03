@@ -1,0 +1,25 @@
+# LiveKit Server Configuration
+# See: https://docs.livekit.io/realtime/self-hosting/deployment/
+
+port: 7880
+rtc:
+  port_range_start: 50000
+  port_range_end: 60000
+  tcp_port: 7881
+  use_external_ip: false
+
+keys:
+  devkey: secret
+
+logging:
+  level: info
+
+room:
+  empty_timeout: 300        # 5 minutes
+  max_participants: 10
+
+turn:
+  enabled: false
+
+webhook:
+  urls: []
