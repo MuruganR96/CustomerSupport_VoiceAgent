@@ -1,5 +1,6 @@
 """LiveKit room and token management service."""
 
+import json
 import logging
 from livekit.api import LiveKitAPI, AccessToken, VideoGrants
 
@@ -9,10 +10,16 @@ logger = logging.getLogger(__name__)
 
 
 class LiveKitService:
-    """Manages LiveKit rooms, tokens, and dispatches."""
+    """Manages LiveKit rooms, tokens, and agent dispatches."""
 
     def __init__(self):
         self.settings = get_settings()
+
+    def _get_http_url(self) -> str:
+        """Convert WebSocket URL to HTTP for API calls."""
+        return self.settings.livekit_url.replace("ws://", "http://").replace(
+            "wss://", "https://"
+        )
 
     def create_user_token(self, room_name: str, identity: str) -> str:
         """Generate a LiveKit access token for a user (customer)."""
@@ -35,33 +42,10 @@ class LiveKitService:
         token.ttl = 6 * 3600
         return token.to_jwt()
 
-    def create_agent_token(self, room_name: str, identity: str = "agent") -> str:
-        """Generate a LiveKit access token for the voice agent."""
-        token = AccessToken(
-            api_key=self.settings.livekit_api_key,
-            api_secret=self.settings.livekit_api_secret,
-        )
-        token.identity = identity
-        token.name = "Support Agent"
-        token.add_grant(
-            VideoGrants(
-                room_join=True,
-                room=room_name,
-                can_publish=True,
-                can_subscribe=True,
-                can_publish_data=True,
-                room_admin=True,
-            )
-        )
-        token.ttl = 6 * 3600
-        return token.to_jwt()
-
     async def create_room(self, room_name: str) -> dict:
         """Create a LiveKit room via the API."""
         api = LiveKitAPI(
-            url=self.settings.livekit_url.replace("ws://", "http://").replace(
-                "wss://", "https://"
-            ),
+            url=self._get_http_url(),
             api_key=self.settings.livekit_api_key,
             api_secret=self.settings.livekit_api_secret,
         )
@@ -83,12 +67,43 @@ class LiveKitService:
         finally:
             await api.aclose()
 
+    async def dispatch_agent(
+        self, room_name: str, session_id: str, customer_name: str
+    ):
+        """Dispatch a LiveKit agent worker to join the room.
+
+        The agent worker receives session metadata via the dispatch request
+        and uses it to configure per-session LangGraph memory and greeting.
+        """
+        api = LiveKitAPI(
+            url=self._get_http_url(),
+            api_key=self.settings.livekit_api_key,
+            api_secret=self.settings.livekit_api_secret,
+        )
+        try:
+            from livekit.api import CreateAgentDispatchRequest
+
+            await api.agent_dispatch.create_dispatch(
+                CreateAgentDispatchRequest(
+                    room=room_name,
+                    agent_name="customer-support",
+                    metadata=json.dumps({
+                        "session_id": session_id,
+                        "customer_name": customer_name,
+                    }),
+                )
+            )
+            logger.info(f"Dispatched agent to room: {room_name}")
+        except Exception as e:
+            logger.error(f"Failed to dispatch agent to {room_name}: {e}")
+            raise
+        finally:
+            await api.aclose()
+
     async def delete_room(self, room_name: str):
         """Delete a LiveKit room."""
         api = LiveKitAPI(
-            url=self.settings.livekit_url.replace("ws://", "http://").replace(
-                "wss://", "https://"
-            ),
+            url=self._get_http_url(),
             api_key=self.settings.livekit_api_key,
             api_secret=self.settings.livekit_api_secret,
         )

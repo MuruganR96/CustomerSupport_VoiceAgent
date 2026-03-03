@@ -21,12 +21,6 @@ class Settings(BaseSettings):
     # --- Redis ---
     redis_url: str = "redis://redis:6379/0"
 
-    # --- STT Service ---
-    stt_service_url: str = "http://stt-service:8001"
-
-    # --- TTS Service ---
-    tts_service_url: str = "http://tts-service:8002"
-
     class Config:
         env_file = ".env"
         env_file_encoding = "utf-8"

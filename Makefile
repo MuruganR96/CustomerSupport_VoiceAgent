@@ -29,11 +29,8 @@ clean: ## Remove all containers, images, and volumes
 logs-backend: ## Follow backend logs
 	docker compose logs -f backend
 
-logs-stt: ## Follow STT service logs
-	docker compose logs -f stt-service
-
-logs-tts: ## Follow TTS service logs
-	docker compose logs -f tts-service
+logs-agent: ## Follow agent worker logs
+	docker compose logs -f agent-worker
 
 logs-livekit: ## Follow LiveKit server logs
 	docker compose logs -f livekit-server
@@ -46,11 +43,8 @@ dev-backend: ## Run backend locally (outside Docker)
 dev-frontend: ## Run frontend dev server locally
 	cd frontend && npm install && npm run dev
 
-dev-stt: ## Run STT service locally
-	cd stt_service && uvicorn main:app --host 0.0.0.0 --port 8001 --reload
-
-dev-tts: ## Run TTS service locally
-	cd tts_service && uvicorn main:app --host 0.0.0.0 --port 8002 --reload
+dev-agent: ## Run agent worker locally
+	cd agent_worker && python -m livekit.agents.cli dev --agent main
 
 # ── Setup ─────────────────────────────────────────────────────────────────────
 
@@ -60,6 +54,5 @@ setup: ## Copy .env.example to .env
 
 install: ## Install all dependencies locally
 	cd backend && pip install -r requirements.txt
-	cd stt_service && pip install -r requirements.txt
-	cd tts_service && pip install -r requirements.txt
+	cd agent_worker && pip install -r requirements.txt
 	cd frontend && npm install

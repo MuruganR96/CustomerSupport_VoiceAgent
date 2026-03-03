@@ -42,8 +42,6 @@ def create_app() -> FastAPI:
     async def startup():
         logger.info(f"Starting {settings.app_name}")
         logger.info(f"LiveKit URL: {settings.livekit_url}")
-        logger.info(f"STT Service: {settings.stt_service_url}")
-        logger.info(f"TTS Service: {settings.tts_service_url}")
 
     @app.on_event("shutdown")
     async def shutdown():

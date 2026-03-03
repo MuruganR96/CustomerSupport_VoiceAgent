@@ -1,0 +1,28 @@
+FROM python:3.11-slim
+
+WORKDIR /app
+
+# Install system dependencies for faster-whisper, kokoro, audio processing
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    gcc \
+    libsndfile1 \
+    espeak-ng \
+    ffmpeg \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy and install requirements
+COPY agent_worker/requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Copy agent worker code
+COPY agent_worker/ ./agent_worker/
+
+# Copy prompt config (shared with backend)
+COPY backend/config/ ./backend/config/
+
+# Pre-download Whisper model during build for faster cold starts
+ARG WHISPER_MODEL=base
+RUN python -c "from faster_whisper import WhisperModel; WhisperModel('${WHISPER_MODEL}', device='cpu', compute_type='int8')"
+
+# LiveKit Agents worker entrypoint
+CMD ["python", "-m", "livekit.agents.cli", "start", "--agent", "agent_worker.main"]

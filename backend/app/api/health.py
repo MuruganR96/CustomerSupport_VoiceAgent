@@ -16,7 +16,5 @@ async def health_check():
         version="1.0.0",
         services={
             "livekit": settings.livekit_url,
-            "stt": settings.stt_service_url,
-            "tts": settings.tts_service_url,
         },
     )

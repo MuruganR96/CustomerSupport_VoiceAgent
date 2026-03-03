@@ -16,7 +16,6 @@ from ..models.schemas import (
 from ..core.config import get_settings
 from ..core.session_store import session_store
 from ..services.livekit_service import livekit_service
-from ..agent.voice_worker import start_agent_for_session, stop_agent_for_session
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/sessions", tags=["sessions"])
@@ -45,10 +44,10 @@ async def create_session(req: CreateSessionRequest):
             topic=req.topic or "general",
         )
 
-        # Start the voice agent worker for this session
-        await start_agent_for_session(
-            session_id=session_id,
+        # Dispatch the LiveKit agent worker to this room
+        await livekit_service.dispatch_agent(
             room_name=room_name,
+            session_id=session_id,
             customer_name=req.customer_name or "Customer",
         )
 
@@ -81,9 +80,6 @@ async def end_session(req: EndSessionRequest):
     session = await session_store.get_session(req.session_id)
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
-
-    # Stop the voice agent worker
-    await stop_agent_for_session(req.session_id)
 
     await session_store.update_status(req.session_id, SessionStatus.COMPLETED)
 

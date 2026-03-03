@@ -21,5 +21,8 @@ room:
 turn:
   enabled: false
 
+agent:
+  enabled: true
+
 webhook:
   urls: []
