@@ -34,7 +34,6 @@ class AgentState(TypedDict):
 
 def load_system_prompt() -> str:
     """Load and format the system prompt from YAML config."""
-    # Look for prompt config relative to this file, then fall back to backend path
     prompt_paths = [
         Path(__file__).parent.parent / "config" / "prompts" / "customer_support_prompt.yaml",
         Path(__file__).parent.parent.parent / "backend" / "config" / "prompts" / "customer_support_prompt.yaml",
@@ -53,51 +52,105 @@ def load_system_prompt() -> str:
         logger.warning("Prompt config not found, using default")
         config = {
             "persona": {"name": "Alex", "role": "Customer Support Specialist"},
-            "voice_rules": {},
         }
 
     persona = config.get("persona", {})
-    voice_rules = config.get("voice_rules", {})
+    voice_rules = config.get("voice_output_rules", {})
+    speech = config.get("speech_patterns", {})
     support_flow = config.get("support_flow", [])
+    guardrails = config.get("guardrails", [])
 
+    name = persona.get("name", "Alex")
+    role = persona.get("role", "Customer Support Specialist")
+
+    # Build personality paragraph
+    personality_lines = persona.get("personality", [])
+    personality_text = " ".join(personality_lines)
+
+    # Build formatting rules
+    formatting = voice_rules.get("formatting", {})
+    formatting_text = "\n".join(f"- {k.title()}: {v}" for k, v in formatting.items())
+
+    # Build grammar rules
+    grammar_rules = "\n".join(f"- {r}" for r in speech.get("grammar", []))
+
+    # Build filler examples
+    fillers = speech.get("fillers", {})
+    filler_text = ""
+    for category, examples in fillers.items():
+        filler_text += f"- {category.title()}: {', '.join(examples)}\n"
+
+    # Build reaction examples
+    reactions = speech.get("reactions", {})
+    reaction_text = ""
+    for category, examples in reactions.items():
+        reaction_text += f"- {category.title()}: {', '.join(examples)}\n"
+
+    # Build pacing rules
+    pacing_text = "\n".join(f"- {r}" for r in speech.get("pacing", []))
+
+    # Build conversation flow with examples
     flow_text = ""
     for phase in support_flow:
         goals = ", ".join(phase.get("goals", []))
-        flow_text += f"- {phase['phase']} ({phase.get('duration', '')}): {goals}\n"
+        example = phase.get("example", "")
+        flow_text += f"- {phase['phase']}: {goals}\n"
+        if example:
+            flow_text += f'  Example: "{example}"\n'
 
-    fillers = ", ".join(voice_rules.get("fillers", []))
-    reactions = ", ".join(voice_rules.get("reactions", []))
+    # Build formatting bans
+    never_use = voice_rules.get("never_use", [])
+    bans_text = "\n".join(f"- NEVER use {item}" for item in never_use)
 
-    return f"""You are {persona.get('name', 'Alex')}, a {persona.get('role', 'Customer Support Specialist')}.
-Your style is: {persona.get('style', 'friendly and professional')}.
+    # Build guardrails
+    guardrails_text = "\n".join(f"- {g}" for g in guardrails)
+
+    return f"""You are {name}, a {role}.
+
+IMPORTANT: Respond in plain text only. No markdown. No formatting. This is a voice conversation.
+
+=== WHO YOU ARE ===
+{personality_text}
+
+=== VOICE OUTPUT RULES ===
+This is a VOICE conversation. Your responses will be spoken aloud by a TTS engine.
+Keep responses SHORT: one to three sentences maximum.
+
+{bans_text}
+
+Write everything as natural spoken language. If explaining steps, say them conversationally: \
+"First you'll wanna... then after that..."
+If you need to mention more than three items, summarize instead of listing them out.
+
+=== TTS FORMATTING ===
+{formatting_text}
+
+=== HOW YOU TALK ===
+Speech patterns — follow these closely:
+{grammar_rules}
+
+Natural fillers to use:
+{filler_text}
+Reactions to use:
+{reaction_text}
+Pacing:
+{pacing_text}
 
 === CONVERSATION FLOW ===
 {flow_text}
 
-=== CRITICAL VOICE BEHAVIOR ===
-This is a VOICE conversation. Your responses will be spoken aloud by a TTS engine.
-
-Response Rules:
-- Keep responses SHORT: 1-3 sentences maximum
-- Use natural fillers: {fillers}
-- Use natural reactions: {reactions}
-- NEVER use markdown, bullet points, numbered lists, or special formatting
-- NEVER use asterisks, bold, headers, or code blocks
-- Write everything as natural spoken language
-- If explaining steps, say them conversationally: "First you'll want to... then after that..."
-- If you need to mention more than 3 items, summarize instead of listing
-- Always check: "Does that help?" or "Is there anything else?"
-- If you can't resolve the issue, offer to create a support ticket
-
-Tool Usage:
-- Use lookup_order when customer mentions an order number
-- Use lookup_account when customer provides their email
-- Use check_knowledge_base for general questions about policies
-- Use create_ticket when you can't resolve the issue or customer requests escalation
+=== TOOLS ===
+- Use lookup_order when the customer mentions an order number
+- Use lookup_account when they provide their email
+- Use check_knowledge_base for general questions about policies or how things work
+- Use create_ticket when you can't resolve the issue or the customer wants escalation
 - Use end_call ONLY after confirming the customer has no more questions
 
-IMPORTANT: You are ONLY a customer support agent. Politely redirect any off-topic requests.
-Do NOT make up information. If you don't know something, say so and offer to check or escalate."""
+=== GUARDRAILS ===
+{guardrails_text}
+
+REMEMBER: You are speaking out loud. Plain text only. No markdown, no bullet points, no formatting. \
+Keep it short and conversational. One to three sentences max, then check in."""
 
 
 # ── Graph Nodes ───────────────────────────────────────────────────────────────

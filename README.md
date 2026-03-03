@@ -1,6 +1,6 @@
 # Customer Support Voice Agent
 
-A production-ready AI-powered customer support voice agent built with **LangGraph**, **LiveKit**, **Whisper STT**, and **Kokoro TTS**.
+A production-ready AI-powered customer support voice agent built with **LiveKit Agents**, **LangGraph**, **FasterWhisper STT**, and **Kokoro TTS**.
 
 ## Architecture
 
@@ -13,39 +13,41 @@ A production-ready AI-powered customer support voice agent built with **LangGrap
                           │ REST API + WebSocket
 ┌─────────────────────────▼────────────────────────────────────────┐
 │                   Backend (FastAPI)  :8000                        │
-│  ┌─────────────────────────────────────────────────────────────┐ │
-│  │           LangGraph Customer Support Agent                   │ │
-│  │  ┌──────────┐  ┌────────────┐  ┌───────────────────────┐   │ │
-│  │  │ Agent    │→ │ Tool Node  │→ │ End / Respond         │   │ │
-│  │  │ (GPT-4o) │  │ (5 tools)  │  │                       │   │ │
-│  │  └──────────┘  └────────────┘  └───────────────────────┘   │ │
-│  └─────────────────────────────────────────────────────────────┘ │
-│  ┌──────────────────────┐  ┌──────────────────────────────────┐  │
-│  │  Voice Agent Worker  │  │  Session Management              │  │
-│  │  LiveKit ↔ STT ↔ AI  │  │  + LiveKit Token Service         │  │
-│  │  ↔ TTS ↔ LiveKit     │  │                                  │  │
-│  └──────────┬───────────┘  └──────────────────────────────────┘  │
-└─────────────┼────────────────────────────────────────────────────┘
-              │
-    ┌─────────┼──────────┐
-    │         │          │
-┌───▼───┐ ┌──▼───┐ ┌────▼─────┐
-│LiveKit│ │ STT  │ │   TTS    │
-│Server │ │Whisper│ │  Kokoro  │
-│ :7880 │ │ :8001│ │  :8002   │
-└───────┘ └──────┘ └──────────┘
+│  Session Management · LiveKit Token Service · Health Check        │
+└─────────────────────────┬────────────────────────────────────────┘
+                          │
+┌─────────────────────────▼────────────────────────────────────────┐
+│                Agent Worker (LiveKit Agents)                      │
+│  ┌──────────────────────────────────────────────────────────────┐│
+│  │              LangGraph Customer Support Agent                ││
+│  │   ┌──────────┐   ┌────────────┐   ┌──────────────────┐      ││
+│  │   │ Agent    │ → │ Tool Node  │ → │ End / Respond    │      ││
+│  │   │(GPT-4o)  │   │ (5 tools)  │   │                  │      ││
+│  │   └──────────┘   └────────────┘   └──────────────────┘      ││
+│  └──────────────────────────────────────────────────────────────┘│
+│  ┌─────────────────┐  ┌──────────────┐  ┌────────────────────┐  │
+│  │ FasterWhisper   │  │ Silero VAD   │  │ Kokoro TTS         │  │
+│  │ STT (in-proc)   │  │              │  │ (in-proc)          │  │
+│  └─────────────────┘  └──────────────┘  └────────────────────┘  │
+└─────────────────────────┬────────────────────────────────────────┘
+                          │
+                ┌─────────▼──────────┐
+                │   LiveKit Server   │
+                │    :7880 (SFU)     │
+                └────────────────────┘
 ```
 
 ## Stack
 
 | Layer | Technology |
 |-------|-----------|
-| Frontend | React 18, Vite, Tailwind CSS, LiveKit Client SDK |
-| Backend | FastAPI, Python 3.11 |
-| AI Agent | LangGraph with GPT-4o-mini, 5 support tools |
-| Voice | LiveKit Server (WebRTC SFU) |
-| STT | OpenAI Whisper (self-hosted, streaming) |
-| TTS | Kokoro TTS (self-hosted, streaming) |
+| Frontend | React 18, Vite, Pure CSS (vm- design system), LiveKit Client SDK |
+| Backend | FastAPI, Python 3.11, LiveKit Server SDK |
+| AI Agent | LangGraph + GPT-4o-mini, 5 support tools |
+| Voice Pipeline | LiveKit Agents framework (AgentSession, VoicePipelineAgent) |
+| STT | FasterWhisper (self-hosted, in-process plugin) |
+| TTS | Kokoro TTS (self-hosted, in-process plugin) |
+| VAD | Silero VAD |
 | Infra | Docker Compose, Nginx, Redis |
 
 ## Quick Start
@@ -53,6 +55,9 @@ A production-ready AI-powered customer support voice agent built with **LangGrap
 ### 1. Clone and configure
 
 ```bash
+git clone <your-repo-url>
+cd CustmerSupport_VoiceAgent
+
 cp .env.example .env
 # Edit .env with your OpenAI API key
 ```
@@ -69,9 +74,20 @@ docker compose logs -f
 
 ### 3. Open the app
 
-- Frontend: http://localhost:3000
-- Backend API: http://localhost:8000/docs
-- LiveKit: ws://localhost:7880
+- **Frontend**: http://localhost:3000
+- **Backend API**: http://localhost:8000/docs
+- **LiveKit**: ws://localhost:7880
+
+## How It Works
+
+1. User opens the frontend and clicks **Connect Now**
+2. Backend creates a session and returns a LiveKit token
+3. Frontend connects to LiveKit room, enables microphone
+4. Agent Worker joins the room via LiveKit Agents framework
+5. User speaks → Silero VAD detects speech → FasterWhisper transcribes
+6. Transcription → LangGraph agent reasons and calls tools if needed
+7. Agent response → Kokoro TTS synthesizes speech → User hears reply
+8. Transcriptions appear in the chat UI in real-time (word-by-word accumulation)
 
 ## LangGraph Agent Tools
 
@@ -84,6 +100,18 @@ The AI agent has 5 customer support tools:
 | `check_knowledge_base` | Search FAQ/knowledge base |
 | `create_ticket` | Escalate to human support |
 | `end_call` | End the voice call |
+
+## Frontend UI
+
+The chat-centric UI uses a custom `vm-` CSS design system (no Tailwind):
+
+- **Pre-join screen**: Name input + Connect Now button
+- **Active call**: Scrollable chat with gray agent bubbles (left) and gradient user bubbles (right)
+- **Typing indicator**: Three bouncing dots when agent is thinking
+- **Speaking pill**: Floating indicator for "Agent is speaking..." / "Listening..."
+- **Input bar**: Text input + mic toggle (with pulse animation) + End call button
+- **End screen**: Call complete summary with duration
+- **Responsive**: 560px centered card on desktop, full-width on mobile
 
 ## Makefile Commands
 
@@ -101,57 +129,71 @@ make dev-frontend  # Run frontend locally
 ## Project Structure
 
 ```
-├── backend/                    # FastAPI + LangGraph
+├── agent_worker/              # LiveKit Agents voice worker
+│   ├── main.py                # Worker entrypoint (AgentSession)
+│   ├── agent/
+│   │   ├── graph.py           # LangGraph state graph + prompt
+│   │   └── tools.py           # 5 support tools
+│   ├── config/prompts/
+│   │   └── customer_support_prompt.yaml
+│   └── plugins/
+│       ├── faster_whisper_stt.py  # In-process STT plugin
+│       └── kokoro_tts.py          # In-process TTS plugin
+│
+├── backend/                   # FastAPI session management
 │   ├── app/
-│   │   ├── agent/
-│   │   │   ├── graph.py        # LangGraph state graph
-│   │   │   ├── tools.py        # 5 support tools
-│   │   │   └── voice_worker.py # LiveKit ↔ STT ↔ Agent ↔ TTS
+│   │   ├── main.py            # FastAPI entry point
 │   │   ├── api/
-│   │   │   ├── sessions.py     # Session CRUD endpoints
-│   │   │   └── health.py       # Health check
+│   │   │   ├── sessions.py    # Session CRUD endpoints
+│   │   │   └── health.py      # Health check
 │   │   ├── core/
-│   │   │   ├── config.py       # Pydantic settings
-│   │   │   └── session_store.py # In-memory session store
+│   │   │   ├── config.py      # Pydantic settings
+│   │   │   └── session_store.py
 │   │   ├── models/
-│   │   │   └── schemas.py      # Pydantic schemas
-│   │   ├── services/
-│   │   │   └── livekit_service.py # Token + room management
-│   │   └── main.py             # FastAPI entry point
+│   │   │   └── schemas.py     # Pydantic schemas
+│   │   └── services/
+│   │       └── livekit_service.py  # Token + room management
 │   └── config/prompts/
 │       └── customer_support_prompt.yaml
 │
-├── frontend/                   # React Chat UI
+├── frontend/                  # React chat UI
+│   ├── index.html
+│   ├── package.json
+│   ├── vite.config.js
 │   └── src/
-│       ├── App.jsx
+│       ├── App.jsx            # Main layout (3 states)
+│       ├── main.jsx
 │       ├── components/
-│       │   ├── ChatMessage.jsx
-│       │   ├── ControlBar.jsx
-│       │   └── TypingIndicator.jsx
-│       └── hooks/
-│           └── useVoiceSession.js  # LiveKit hook
+│       │   └── ChatMessage.jsx    # Message bubbles
+│       ├── hooks/
+│       │   └── useVoiceSession.js # LiveKit room hook
+│       └── styles/
+│           └── index.css          # vm- design system
 │
-├── stt_service/                # Whisper STT microservice
-│   └── main.py                 # HTTP + WebSocket endpoints
+├── docker/                    # Dockerfiles + nginx config
+│   ├── Dockerfile.agent
+│   ├── Dockerfile.backend
+│   ├── Dockerfile.frontend
+│   └── nginx.conf
 │
-├── tts_service/                # Kokoro TTS microservice
-│   └── main.py                 # Streaming synthesis
+├── livekit/                   # LiveKit server config
+│   └── livekit.yaml
 │
-├── docker/                     # Dockerfiles + nginx config
-├── livekit/                    # LiveKit server config
-├── docker-compose.yaml         # Full stack orchestration
-└── Makefile                    # Convenience commands
+├── docker-compose.yaml        # Full stack orchestration
+├── Makefile                   # Convenience commands
+├── .env.example               # Environment template
+└── .gitignore
 ```
 
 ## Audio Pipeline
 
 ```
-User speaks → Mic → LiveKit Room → Voice Worker
-  → PCM frames buffered (VAD: energy-based)
-  → Silence detected → POST to Whisper STT
-  → Transcribed text → LangGraph Agent
-  → Agent response → POST to Kokoro TTS (streaming)
-  → PCM frames → LiveKit AudioSource → User hears
+User speaks → Mic → LiveKit Room → Agent Worker
+  → Silero VAD detects speech boundaries
+  → Audio frames → FasterWhisper STT (in-process)
+  → Transcribed text → LangGraph Agent (reason + tools)
+  → Agent response text → Kokoro TTS (in-process, streaming)
+  → Audio frames → LiveKit AudioSource → User hears reply
 ```
 
 ## Environment Variables
@@ -159,14 +201,16 @@ User speaks → Mic → LiveKit Room → Voice Worker
 See `.env.example` for all configuration options. The minimum required:
 
 - `OPENAI_API_KEY` — For the LangGraph agent LLM
-- `LIVEKIT_API_KEY` / `LIVEKIT_API_SECRET` — LiveKit auth
+- `LIVEKIT_API_KEY` / `LIVEKIT_API_SECRET` — LiveKit auth (defaults: `devkey`/`secret`)
 
 ## Extending
 
-**Add new tools**: Edit `backend/app/agent/tools.py` and add to the `support_tools` list.
+**Add new tools**: Edit `agent_worker/agent/tools.py` and add to the `support_tools` list.
 
-**Change LLM**: Edit `backend/app/agent/graph.py` — update `model_name` parameter.
+**Change LLM**: Edit `agent_worker/agent/graph.py` — update `model_name` parameter in `create_agent_graph()`.
 
-**Change voice**: Set `KOKORO_VOICE` env var (see `GET /voices` on TTS service).
+**Change voice**: Set `KOKORO_VOICE` env var (default: `af_heart`).
 
-**Production**: Replace `session_store.py` with Redis-backed store, add MongoDB for persistence.
+**Change STT model**: Set `WHISPER_MODEL` env var (default: `base`, options: `tiny`, `base`, `small`, `medium`, `large-v3`).
+
+**Production**: Replace `session_store.py` with Redis-backed store, add persistent database for session history.

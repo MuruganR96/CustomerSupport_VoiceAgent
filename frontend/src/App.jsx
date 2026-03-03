@@ -1,16 +1,14 @@
-import React, { useRef, useEffect, useState } from 'react';
-import { Phone, Headphones, Wifi, WifiOff } from 'lucide-react';
+import { useRef, useEffect, useState } from 'react';
 import { useVoiceSession } from './hooks/useVoiceSession';
 import ChatMessage from './components/ChatMessage';
-import TypingIndicator from './components/TypingIndicator';
-import ControlBar from './components/ControlBar';
+import './styles/index.css';
 
 export default function App() {
   const {
     connectionState,
     messages,
     isMuted,
-    isAgentThinking,
+    agentState,
     sessionId,
     error,
     connect,
@@ -20,144 +18,244 @@ export default function App() {
   } = useVoiceSession();
 
   const [customerName, setCustomerName] = useState('');
-  const messagesEndRef = useRef(null);
+  const [inputText, setInputText] = useState('');
+  const [callDuration, setCallDuration] = useState(0);
+  const [ended, setEnded] = useState(false);
 
-  // Auto-scroll to bottom on new messages
-  useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages, isAgentThinking]);
-
-  const handleConnect = () => {
-    connect(customerName || 'Customer');
-  };
+  const chatAreaRef = useRef(null);
+  const timerRef = useRef(null);
 
   const isDisconnected = connectionState === 'disconnected';
   const isConnecting = connectionState === 'connecting';
   const isConnected = connectionState === 'connected';
 
+  // Format duration as MM:SS
+  const formatDuration = (seconds) => {
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+  };
+
+  // Auto-scroll chat to bottom on new messages or typing indicator
+  useEffect(() => {
+    if (chatAreaRef.current) {
+      chatAreaRef.current.scrollTop = chatAreaRef.current.scrollHeight;
+    }
+  }, [messages, agentState]);
+
+  // Call duration timer
+  useEffect(() => {
+    if (isConnected && !ended) {
+      timerRef.current = setInterval(() => {
+        setCallDuration(prev => prev + 1);
+      }, 1000);
+    }
+    return () => {
+      if (timerRef.current) {
+        clearInterval(timerRef.current);
+        timerRef.current = null;
+      }
+    };
+  }, [isConnected, ended]);
+
+  // Detect disconnect after being connected (call ended)
+  useEffect(() => {
+    if (isDisconnected && callDuration > 0) {
+      setEnded(true);
+    }
+  }, [isDisconnected, callDuration]);
+
+  const handleConnect = () => {
+    connect(customerName || 'Customer');
+  };
+
+  const handleEndCall = async () => {
+    if (timerRef.current) {
+      clearInterval(timerRef.current);
+      timerRef.current = null;
+    }
+    await disconnect();
+    setEnded(true);
+  };
+
+  const handleSendText = () => {
+    if (!inputText.trim()) return;
+    sendTextMessage(inputText.trim());
+    setInputText('');
+  };
+
+  const handleKeyDown = (e) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      handleSendText();
+    }
+  };
+
+  // ── Ended State ───────────────────────────────────────────────────
+  if (ended) {
+    return (
+      <div className="vm-container">
+        <div className="vm-header">
+          <div className="vm-header-left"></div>
+          <h1 className="vm-header-title">Customer Support</h1>
+          <div className="vm-header-right"></div>
+        </div>
+        <div className="vm-ended">
+          <div className="vm-ended-icon">
+            <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <polyline points="20 6 9 17 4 12"></polyline>
+            </svg>
+          </div>
+          <h2 className="vm-ended-title">Call Complete</h2>
+          <p className="vm-ended-message">
+            Thank you for contacting us! We hope we were able to help. Don&apos;t hesitate to reach out again anytime.
+          </p>
+          {callDuration > 0 && (
+            <p className="vm-duration">Duration: {formatDuration(callDuration)}</p>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  // ── Connect Screen (Pre-join) ─────────────────────────────────────
+  if (isDisconnected || isConnecting) {
+    return (
+      <div className="vm-container">
+        <div className="vm-header">
+          <div className="vm-header-left"></div>
+          <h1 className="vm-header-title">Customer Support</h1>
+          <div className="vm-header-right"></div>
+        </div>
+
+        <div className="vm-prejoin">
+          <h2 className="vm-prejoin-title">Start a Support Call</h2>
+          <p className="vm-prejoin-subtitle">
+            Connect with our AI voice assistant for instant help with your questions
+          </p>
+
+          {error && (
+            <div className="vm-error-banner">{error}</div>
+          )}
+
+          <input
+            type="text"
+            className="vm-name-input"
+            value={customerName}
+            onChange={(e) => setCustomerName(e.target.value)}
+            placeholder="Your name (optional)"
+            onKeyDown={(e) => e.key === 'Enter' && handleConnect()}
+          />
+
+          <button
+            className="vm-join-btn"
+            onClick={handleConnect}
+            disabled={isConnecting}
+          >
+            {isConnecting ? (
+              <>
+                <span className="vm-btn-spinner"></span>
+                Connecting...
+              </>
+            ) : (
+              'Connect Now'
+            )}
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  // ── Active Call — Chat Interface ──────────────────────────────────
+  const showTypingIndicator = agentState === 'thinking';
+  const showSpeakingPill = isConnected && (agentState === 'speaking' || agentState === 'listening');
+  const speakingPillText = agentState === 'speaking' ? 'Agent is speaking...' : 'Listening...';
+
   return (
-    <div className="h-screen flex flex-col bg-gray-50">
-      {/* ─── Header ─────────────────────────────────────────────────────── */}
-      <header className="bg-white border-b border-gray-200 px-6 py-4 flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-xl bg-indigo-600 flex items-center justify-center">
-            <Headphones size={20} className="text-white" />
-          </div>
-          <div>
-            <h1 className="text-lg font-semibold text-gray-900">Customer Support</h1>
-            <p className="text-xs text-gray-500">Voice Agent powered by AI</p>
-          </div>
-        </div>
-
-        {/* Connection status */}
-        <div className="flex items-center gap-2">
+    <div className="vm-container">
+      {/* Header */}
+      <div className="vm-header">
+        <div className="vm-header-left">
           {isConnected && (
-            <div className="flex items-center gap-2 px-3 py-1.5 bg-green-50 border border-green-200 rounded-full">
-              <div className="relative">
-                <div className="w-2 h-2 bg-green-500 rounded-full" />
-                <div className="absolute inset-0 w-2 h-2 bg-green-400 rounded-full animate-pulse-ring" />
-              </div>
-              <span className="text-xs font-medium text-green-700">Connected</span>
-            </div>
+            <span className="vm-connection-dot connected"></span>
           )}
-          {isConnecting && (
-            <div className="flex items-center gap-2 px-3 py-1.5 bg-amber-50 border border-amber-200 rounded-full">
-              <Wifi size={14} className="text-amber-600 animate-pulse" />
-              <span className="text-xs font-medium text-amber-700">Connecting...</span>
-            </div>
-          )}
-          {isDisconnected && !error && (
-            <div className="flex items-center gap-2 px-3 py-1.5 bg-gray-100 rounded-full">
-              <WifiOff size={14} className="text-gray-400" />
-              <span className="text-xs font-medium text-gray-500">Disconnected</span>
-            </div>
-          )}
+          <span className="vm-timer">{formatDuration(callDuration)}</span>
         </div>
-      </header>
+        <h1 className="vm-header-title">Customer Support</h1>
+        <div className="vm-header-right">
+          <span className="vm-menu-icon">&#8942;</span>
+        </div>
+      </div>
 
-      {/* ─── Main Content ───────────────────────────────────────────────── */}
-      <main className="flex-1 overflow-hidden flex flex-col">
-        {isDisconnected ? (
-          /* ─── Connect Screen ────────────────────────────────────────── */
-          <div className="flex-1 flex items-center justify-center p-6">
-            <div className="w-full max-w-md text-center">
-              <div className="w-20 h-20 mx-auto mb-6 rounded-2xl bg-indigo-100 flex items-center justify-center">
-                <Phone size={32} className="text-indigo-600" />
-              </div>
-              <h2 className="text-2xl font-bold text-gray-900 mb-2">
-                Start a Support Call
-              </h2>
-              <p className="text-gray-500 mb-8">
-                Connect with our AI voice assistant for instant help
-              </p>
+      {/* Chat Area */}
+      <div className="vm-chat-area" ref={chatAreaRef}>
+        {messages.length === 0 && !showTypingIndicator && (
+          <div className="vm-chat-empty">
+            <p>The conversation will begin shortly...</p>
+          </div>
+        )}
 
-              {error && (
-                <div className="mb-6 p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">
-                  {error}
-                </div>
-              )}
+        {messages.map((msg) => (
+          <ChatMessage key={msg.id} message={msg} />
+        ))}
 
-              <div className="mb-4">
-                <input
-                  type="text"
-                  value={customerName}
-                  onChange={(e) => setCustomerName(e.target.value)}
-                  placeholder="Your name (optional)"
-                  className="w-full px-4 py-3 bg-white border border-gray-300 rounded-xl text-center focus:outline-none focus:ring-2 focus:ring-indigo-300 focus:border-transparent"
-                  onKeyDown={(e) => e.key === 'Enter' && handleConnect()}
-                />
-              </div>
-
-              <button
-                onClick={handleConnect}
-                disabled={isConnecting}
-                className="w-full py-3.5 bg-indigo-600 text-white font-medium rounded-xl hover:bg-indigo-700 transition-colors disabled:opacity-50 disabled:cursor-wait flex items-center justify-center gap-2"
-              >
-                {isConnecting ? (
-                  <>
-                    <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                    Connecting...
-                  </>
-                ) : (
-                  <>
-                    <Phone size={18} />
-                    Connect Now
-                  </>
-                )}
-              </button>
+        {/* Typing indicator */}
+        {showTypingIndicator && (
+          <div className="vm-message vm-message-agent">
+            <div className="vm-typing-indicator">
+              <span className="vm-typing-dot"></span>
+              <span className="vm-typing-dot"></span>
+              <span className="vm-typing-dot"></span>
             </div>
           </div>
-        ) : (
-          /* ─── Chat Area ─────────────────────────────────────────────── */
-          <>
-            <div className="flex-1 overflow-y-auto px-6 py-4">
-              {messages.length === 0 && !isAgentThinking && (
-                <div className="text-center text-gray-400 mt-12">
-                  <Headphones size={40} className="mx-auto mb-3 opacity-50" />
-                  <p className="text-sm">Waiting for the agent to start...</p>
-                </div>
-              )}
-
-              {messages.map((msg) => (
-                <ChatMessage key={msg.id} message={msg} />
-              ))}
-
-              {isAgentThinking && <TypingIndicator />}
-
-              <div ref={messagesEndRef} />
-            </div>
-
-            {/* ─── Control Bar ──────────────────────────────────────────── */}
-            <ControlBar
-              connectionState={connectionState}
-              isMuted={isMuted}
-              onToggleMute={toggleMute}
-              onSendText={sendTextMessage}
-              onEndCall={disconnect}
-            />
-          </>
         )}
-      </main>
+      </div>
+
+      {/* Speaking indicator pill */}
+      {showSpeakingPill && (
+        <div className="vm-speaking-indicator">
+          {speakingPillText}
+        </div>
+      )}
+
+      {/* Input Bar */}
+      <div className="vm-input-bar">
+        <input
+          type="text"
+          className="vm-input-field"
+          placeholder="Type a message..."
+          value={inputText}
+          onChange={(e) => setInputText(e.target.value)}
+          onKeyDown={handleKeyDown}
+        />
+
+        <button
+          className={`vm-mic-btn ${!isMuted ? 'listening' : 'muted'}`}
+          onClick={toggleMute}
+          title={isMuted ? 'Unmute' : 'Mute'}
+        >
+          {isMuted ? (
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <line x1="1" y1="1" x2="23" y2="23"></line>
+              <path d="M9 9v3a3 3 0 0 0 5.12 2.12M15 9.34V4a3 3 0 0 0-5.94-.6"></path>
+              <path d="M17 16.95A7 7 0 0 1 5 12v-2m14 0v2a7 7 0 0 1-.11 1.23"></path>
+              <line x1="12" y1="19" x2="12" y2="23"></line>
+              <line x1="8" y1="23" x2="16" y2="23"></line>
+            </svg>
+          ) : (
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path>
+              <path d="M19 10v2a7 7 0 0 1-14 0v-2"></path>
+              <line x1="12" y1="19" x2="12" y2="23"></line>
+              <line x1="8" y1="23" x2="16" y2="23"></line>
+            </svg>
+          )}
+        </button>
+
+        <button className="vm-end-btn" onClick={handleEndCall}>
+          End
+        </button>
+      </div>
     </div>
   );
 }

@@ -1,61 +1,61 @@
-import React from 'react';
-import { Headphones, User, AlertCircle } from 'lucide-react';
-
 /**
  * Single chat message bubble — agent, user, or system.
+ * Uses vm- CSS classes matching the VoiceMeeting design system.
  */
 export default function ChatMessage({ message }) {
-  const { speaker, text, timestamp } = message;
+  const { speaker, text, isFinal = true } = message;
 
   const isAgent = speaker === 'agent';
   const isSystem = speaker === 'system';
 
-  const time = timestamp
-    ? new Date(timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-    : '';
-
   if (isSystem) {
     return (
-      <div className="flex justify-center my-3">
-        <div className="flex items-center gap-2 px-4 py-2 bg-amber-50 border border-amber-200 rounded-full text-amber-700 text-sm">
-          <AlertCircle size={14} />
-          <span>{text}</span>
-        </div>
+      <div className={`vm-message vm-message-system`}>
+        <div className="vm-message-text">{text}</div>
       </div>
     );
   }
 
-  return (
-    <div className={`flex gap-3 mb-4 ${isAgent ? 'justify-start' : 'justify-end'}`}>
-      {/* Agent avatar */}
-      {isAgent && (
-        <div className="flex-shrink-0 w-8 h-8 rounded-full bg-indigo-100 flex items-center justify-center">
-          <Headphones size={16} className="text-indigo-600" />
-        </div>
-      )}
+  const pendingClass = !isFinal ? ' vm-message-pending' : '';
 
-      {/* Message bubble */}
-      <div className={`max-w-[75%] ${isAgent ? '' : 'order-first'}`}>
-        <div
-          className={`px-4 py-2.5 rounded-2xl text-sm leading-relaxed ${
-            isAgent
-              ? 'bg-white border border-gray-200 text-gray-800 rounded-tl-sm'
-              : 'bg-indigo-600 text-white rounded-tr-sm'
-          }`}
-        >
-          {text}
-        </div>
-        <div className={`mt-1 text-xs text-gray-400 ${isAgent ? 'text-left' : 'text-right'}`}>
-          {time}
-        </div>
+  if (isAgent) {
+    return (
+      <div className={`vm-message vm-message-agent${pendingClass}`}>
+        <div className="vm-message-text">{text}</div>
+        {isFinal && (
+          <div className="vm-message-actions">
+            <button
+              className="vm-action-btn"
+              title="Copy"
+              onClick={() => navigator.clipboard.writeText(text)}
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+                <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+              </svg>
+            </button>
+            <button className="vm-action-btn" title="Good response">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M14 9V5a3 3 0 0 0-3-3l-4 9v11h11.28a2 2 0 0 0 2-1.7l1.38-9a2 2 0 0 0-2-2.3zM7 22H4a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2h3"></path>
+              </svg>
+            </button>
+            <button className="vm-action-btn" title="Poor response">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M10 15v4a3 3 0 0 0 3 3l4-9V2H5.72a2 2 0 0 0-2 1.7l-1.38 9a2 2 0 0 0 2 2.3zm7-13h2.67A2.31 2.31 0 0 1 22 4v7a2.31 2.31 0 0 1-2.33 2H17"></path>
+              </svg>
+            </button>
+          </div>
+        )}
       </div>
+    );
+  }
 
-      {/* User avatar */}
-      {!isAgent && (
-        <div className="flex-shrink-0 w-8 h-8 rounded-full bg-gray-200 flex items-center justify-center">
-          <User size={16} className="text-gray-600" />
-        </div>
-      )}
+  // User (candidate) message
+  return (
+    <div className={`vm-message vm-message-candidate${pendingClass}`}>
+      <div className="vm-message-bubble">
+        <div className="vm-message-text">{text}</div>
+      </div>
     </div>
   );
 }

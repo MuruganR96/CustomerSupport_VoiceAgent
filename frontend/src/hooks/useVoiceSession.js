@@ -1,6 +1,7 @@
 /**
  * Custom React hook for managing a LiveKit voice session.
- * Handles room connection, audio, data channel, and transcription.
+ * Handles room connection, audio, data channel, transcription accumulation,
+ * and agent state tracking.
  */
 
 import { useState, useRef, useCallback, useEffect } from 'react';
@@ -11,36 +12,50 @@ const LIVEKIT_URL = import.meta.env.VITE_LIVEKIT_URL || 'ws://localhost:7880';
 
 export function useVoiceSession() {
   // State
-  const [connectionState, setConnectionState] = useState('disconnected'); // disconnected | connecting | connected
+  const [connectionState, setConnectionState] = useState('disconnected');
   const [messages, setMessages] = useState([]);
   const [isMuted, setIsMuted] = useState(false);
-  const [isAgentThinking, setIsAgentThinking] = useState(false);
+  const [agentState, setAgentState] = useState('idle'); // idle | listening | thinking | speaking
   const [sessionId, setSessionId] = useState(null);
   const [error, setError] = useState(null);
 
   // Refs
   const roomRef = useRef(null);
-  const seenIdsRef = useRef(new Set());
   const audioElementsRef = useRef([]);
 
   /**
-   * Add a message to the chat, with deduplication.
+   * Upsert a transcript message. Non-final segments update in-place,
+   * final segments lock the text. This creates the "accumulation" effect.
+   */
+  const upsertTranscript = useCallback((speaker, text, id, isFinal) => {
+    setMessages(prev => {
+      const idx = prev.findIndex(m => m.id === id);
+      if (idx !== -1) {
+        // Update existing message in-place
+        const updated = [...prev];
+        updated[idx] = { ...updated[idx], text, isFinal };
+        return updated;
+      }
+      // New message
+      return [
+        ...prev,
+        { id, speaker, text, timestamp: new Date(), isFinal },
+      ];
+    });
+  }, []);
+
+  /**
+   * Add a one-shot message (system messages, typed text).
    */
   const addMessage = useCallback((speaker, text, id) => {
     const key = id || `${speaker}-${Date.now()}-${text.slice(0, 20)}`;
-    if (seenIdsRef.current.has(key)) return;
-    seenIdsRef.current.add(key);
-
-    setMessages(prev => [
-      ...prev,
-      {
-        id: key,
-        speaker,
-        text,
-        timestamp: new Date(),
-      },
-    ]);
-    setIsAgentThinking(false);
+    setMessages(prev => {
+      if (prev.some(m => m.id === key)) return prev;
+      return [
+        ...prev,
+        { id: key, speaker, text, timestamp: new Date(), isFinal: true },
+      ];
+    });
   }, []);
 
   /**
@@ -51,7 +66,7 @@ export function useVoiceSession() {
       setConnectionState('connecting');
       setError(null);
       setMessages([]);
-      seenIdsRef.current.clear();
+      setAgentState('idle');
 
       // 1. Create session via backend API
       const res = await fetch(`${BACKEND_URL}/api/sessions/create`, {
@@ -87,7 +102,7 @@ export function useVoiceSession() {
         }
       });
 
-      // Agent audio playback
+      // Agent audio track — subscribe for playback
       room.on(RoomEvent.TrackSubscribed, (track, pub, participant) => {
         if (track.kind === Track.Kind.Audio) {
           const audio = document.createElement('audio');
@@ -102,27 +117,33 @@ export function useVoiceSession() {
         track.detach();
       });
 
+      // Agent state — listen for participant attribute changes
+      room.on(RoomEvent.ParticipantAttributesChanged, (changedAttrs, participant) => {
+        if (participant.identity?.includes('agent')) {
+          const state = participant.attributes?.['lk.agent.state'];
+          if (state) {
+            setAgentState(state);
+          }
+        }
+      });
+
       // Data channel: transcripts + agent status
       room.on(RoomEvent.DataReceived, (payload) => {
         try {
           const data = JSON.parse(new TextDecoder().decode(payload));
           if (data.type === 'transcript') {
             addMessage(data.speaker, data.text, data.timestamp);
-          } else if (data.type === 'agent_thinking') {
-            setIsAgentThinking(true);
           }
         } catch (e) {
           console.warn('Failed to parse data message:', e);
         }
       });
 
-      // LiveKit built-in transcription events (if available)
+      // Transcription events — accumulate word by word
       room.on(RoomEvent.TranscriptionReceived, (segments, participant) => {
+        const speaker = participant?.identity?.includes('agent') ? 'agent' : 'user';
         segments.forEach(seg => {
-          if (seg.final) {
-            const speaker = participant?.identity?.includes('agent') ? 'agent' : 'user';
-            addMessage(speaker, seg.text, seg.id);
-          }
+          upsertTranscript(speaker, seg.text, seg.id, seg.final);
         });
       });
 
@@ -131,10 +152,11 @@ export function useVoiceSession() {
         if (participant.identity?.includes('agent')) {
           addMessage('system', 'The support agent has disconnected.', `sys-${Date.now()}`);
           setConnectionState('disconnected');
+          setAgentState('idle');
         }
       });
 
-      // 4. Connect to LiveKit (use frontend env var, not backend's internal Docker URL)
+      // 4. Connect to LiveKit
       await room.connect(LIVEKIT_URL, data.livekit_token);
 
       // 5. Enable microphone
@@ -146,14 +168,13 @@ export function useVoiceSession() {
       setError(err.message);
       setConnectionState('disconnected');
     }
-  }, [addMessage]);
+  }, [addMessage, upsertTranscript]);
 
   /**
    * Disconnect from the session.
    */
   const disconnect = useCallback(async () => {
     try {
-      // End session via API
       if (sessionId) {
         await fetch(`${BACKEND_URL}/api/sessions/end`, {
           method: 'POST',
@@ -165,18 +186,17 @@ export function useVoiceSession() {
       console.warn('Error ending session:', e);
     }
 
-    // Disconnect room
     if (roomRef.current) {
       roomRef.current.disconnect();
       roomRef.current = null;
     }
 
-    // Cleanup audio elements
     audioElementsRef.current.forEach(el => el.remove());
     audioElementsRef.current = [];
 
     setConnectionState('disconnected');
     setSessionId(null);
+    setAgentState('idle');
   }, [sessionId]);
 
   /**
@@ -206,7 +226,6 @@ export function useVoiceSession() {
       { reliable: true }
     );
 
-    // Add user message locally
     addMessage('user', text.trim(), `user-text-${Date.now()}`);
   }, [addMessage]);
 
@@ -224,7 +243,7 @@ export function useVoiceSession() {
     connectionState,
     messages,
     isMuted,
-    isAgentThinking,
+    agentState,
     sessionId,
     error,
     connect,
